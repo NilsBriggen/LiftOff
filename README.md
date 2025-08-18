@@ -1,5 +1,7 @@
 # LiftOff - KDrive File Upload Utility
 
+![LiftOff Logo](logo.jpg)
+
 LiftOff is a Python utility designed to simplify the upload of files to KDrive (a cloud storage service) from your local machine with automatic timestamped organization.
 
 ## Features
