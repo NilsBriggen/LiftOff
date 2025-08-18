@@ -1,6 +1,7 @@
-from kdrive_client.kdrive_client import KDriveClient
-from kdrive_client.kdrive_file import KDriveFile
+from liftoff import LiftOff
 
-with open("")
+lift_off = LiftOff()
+path_to_upload = Path("place/holder")
 
-client = KDriveClient(token="")
+if __name__ == "__main__":
+    lift_off.upload(path_to_upload)
