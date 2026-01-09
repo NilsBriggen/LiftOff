@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from liftoff import LiftOff
 
 lift_off = LiftOff()
-path_to_upload = Path("place/holder")
+path_to_archive = Path("place/holder")
 
 if __name__ == "__main__":
-    lift_off.upload(path_to_upload)
+    lift_off.archive(path_to_archive)
