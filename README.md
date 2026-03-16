@@ -11,29 +11,18 @@ LiftOff is a Python utility designed to simplify the archiving of drone videos (
 - Error reporting for failed archiving
 
 ## Prerequisites
-- Python 3.13.2 (or higher)
-- `virtualenv` (for project isolation)
-- `pip` (for package installation)
+- Python 3.10 (or higher) 
 
 ## Installation
 
-1. Create a virtual environment:
-```shell script
-python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or venv\Scripts\activate  # Windows
-```
-
-
-2. Install required packages:
-```shell script
-pip install requests kdrive_client
-```
+Basically nothing. Just download this repo and as long as you have python installed and can edit the path_to_archive variable you're good to go.<br>
+If you want to change the place where the files are archived, go to ```liftoff.py``` and edit ```self.base_path```.<br>self.base_path
+If you want to change the subfolder naming, change the naming scheme in ```__get_path()```.
 
 ## Usage
 
 1. Edit the configuration to the SD Card path(e.g., `place/holder`)
-2. Run the upload script:
+2. Run the script:
 ```shell script
 python main.py
 ```
