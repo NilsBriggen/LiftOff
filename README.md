@@ -22,8 +22,9 @@ natively, on Linux.
 
 ## Features
 
-- **Native desktop GUI** (Qt) — sortable add-on table, live filter, details panel and one-click
-  actions. Plus a full **terminal UI** (`liftoff --tui`) for SSH or keyboard purists.
+- **Native desktop GUI** (Qt) — a refined dark "cockpit" theme with color-coded add-on types,
+  a sortable table, live filter, rich details panel and one-click actions. Plus a full
+  **terminal UI** (`liftoff --tui`) for SSH or keyboard purists.
 - **Auto-detects your sim** — locates the MSFS 2020 & 2024 Community folder inside Steam/Proton
   prefixes by reading `UserCfg.opt` (`InstalledPackagesPath`), including relocated installs and
   extra Steam libraries. Add any folder manually (X-Plane, custom, etc.).

@@ -67,6 +67,17 @@ def test_human_size():
     assert library.human_size(2048) == "2.0 KB"
 
 
+def test_theme_color_codes_type():
+    from liftoff.theme import TYPE_COLORS, addon_html
+
+    addon = library.Addon(
+        name="jet", path=Path("/x/jet"), enabled=True, title="Jet", content_type="AIRCRAFT"
+    )
+    html = addon_html(addon, library.human_size)
+    assert TYPE_COLORS["Aircraft"] in html
+    assert "Jet" in html
+
+
 def test_scan_uses_manifest_total_package_size(tmp_path):
     # When the manifest reports a size, scan must trust it (no disk walk).
     community = tmp_path / "Community"
