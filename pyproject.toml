@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "liftoff-msfs"
+description = "A fast, Linux-native mod manager for Microsoft Flight Simulator with flightsim.to integration."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Nils Briggen" }]
+keywords = ["msfs", "flight-simulator", "flightsim.to", "mod-manager", "tui", "linux"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+dynamic = ["version"]
+dependencies = ["textual>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+
+[project.scripts]
+liftoff = "liftoff.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/NilsBriggen/LiftOff"
+Issues = "https://github.com/NilsBriggen/LiftOff/issues"
+
+[tool.hatch.version]
+path = "liftoff/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["liftoff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

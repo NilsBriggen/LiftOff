@@ -1,2 +1,19 @@
-.venv
-.idea
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual envs / tooling
+.venv/
+venv/
+.idea/
+.vscode/
+.ruff_cache/
+.pytest_cache/
+
+# LiftOff dev artifacts
+/screenshot*.svg
+*.cast
