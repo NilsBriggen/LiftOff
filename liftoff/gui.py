@@ -7,7 +7,6 @@ run on a Qt thread pool so the UI never blocks.
 from __future__ import annotations
 
 import sys
-from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -45,68 +44,15 @@ from .config import Config
 from .gui_dialogs import DownloadsDialog, FlightSimToDialog, SettingsDialog, SimsDialog
 from .install import InstallError, install_archive, remove, set_enabled
 from .library import Addon, human_size, scan
-
-QSS = """
-* { font-size: 13px; }
-QMainWindow, QDialog, QWidget { background: #0b1622; color: #dce6f2; }
-
-QFrame#topbar { background: #13263b; border-bottom: 2px solid #ff8c42; }
-QLabel#brand { color: #ff8c42; font-size: 18px; font-weight: bold; }
-QLabel#path { color: #8aa0b8; }
-QLabel#counts { color: #3ddc84; font-weight: bold; }
-QLabel#hint { color: #8aa0b8; }
-
-QLineEdit, QComboBox {
-    background: #0f1d2e; border: 1px solid #244062; border-radius: 6px;
-    padding: 6px 9px; selection-background-color: #4aa3ff; selection-color: #0b1622;
-}
-QLineEdit:focus, QComboBox:focus { border: 1px solid #4aa3ff; }
-QComboBox::drop-down { border: none; width: 18px; }
-QComboBox QAbstractItemView {
-    background: #0f1d2e; border: 1px solid #244062; selection-background-color: #21456e;
-}
-
-QTableView {
-    background: #0f1d2e; alternate-background-color: #0d1f31;
-    border: 1px solid #244062; border-radius: 8px; gridline-color: transparent;
-    selection-background-color: #21456e; selection-color: #ffffff;
-    outline: none;
-}
-QTableView::item { padding: 5px 8px; border: none; }
-QHeaderView::section {
-    background: #13263b; color: #7bdcff; padding: 7px 8px;
-    border: none; border-bottom: 2px solid #244062; font-weight: bold;
-}
-
-QTextBrowser {
-    background: #0f1d2e; border: 1px solid #244062; border-radius: 8px; padding: 6px;
-}
-
-QPushButton {
-    background: #16293f; color: #dce6f2; border: 1px solid #2a4a6e;
-    border-radius: 6px; padding: 7px 14px;
-}
-QPushButton:hover { background: #1d3754; border-color: #4aa3ff; }
-QPushButton:pressed { background: #122334; }
-QPushButton#primary { background: #ff8c42; color: #0b1622; font-weight: bold; border: none; }
-QPushButton#primary:hover { background: #ffa15f; }
-
-QListWidget {
-    background: #0f1d2e; border: 1px solid #244062; border-radius: 8px;
-    selection-background-color: #21456e; selection-color: #ffffff;
-}
-QListWidget::item { padding: 6px 8px; }
-
-QStatusBar { background: #13263b; color: #8aa0b8; }
-QCheckBox { spacing: 8px; }
-
-QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
-QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
-QScrollBar::handle { background: #2a4a6e; border-radius: 5px; min-height: 24px; min-width: 24px; }
-QScrollBar::handle:hover { background: #3a5a82; }
-QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
-"""
+from .theme import (
+    GREEN,
+    QSS,
+    TXT_MUTED,
+    TYPE_COLORS,
+    TYPE_MISC,
+    WELCOME as _WELCOME,
+    addon_html as _theme_addon_html,
+)
 
 COLUMNS = ["", "Name", "Creator", "Type", "Ver", "Size"]
 _ROOT = QModelIndex()  # the (invalid) root index used as a parent default
@@ -161,9 +107,11 @@ class AddonTableModel(QAbstractTableModel):
             ][col]
         if role == Qt.ForegroundRole:
             if col == 0:
-                return QColor("#3ddc84") if addon.enabled else QColor("#54627a")
+                return QColor(GREEN) if addon.enabled else QColor("#5a6675")
             if not addon.enabled:
-                return QColor("#8aa0b8")
+                return QColor(TXT_MUTED)
+            if col == 3:  # color-coded add-on type
+                return QColor(TYPE_COLORS.get(addon.type_label, TYPE_MISC))
         if role == Qt.TextAlignmentRole and col == 0:
             return int(Qt.AlignCenter)
         return None
@@ -189,44 +137,10 @@ class _Task(QRunnable):
             self.signals.failed.emit(f"Unexpected error: {exc}")
 
 
-_WELCOME = """
-<div style="color:#ff8c42; font-size:16px; font-weight:bold;">Welcome to LiftOff</div>
-<p style="color:#dce6f2;">A fast manager for your Microsoft Flight Simulator
-<b>Community</b> folder.</p>
-<ul style="color:#dce6f2;">
-<li><b>Install</b> an add-on archive, or install straight from <b>Downloads</b></li>
-<li><b>flightsim.to</b> — browse and search the add-on library</li>
-<li><b>Enable / disable</b> and <b>remove</b> without leaving the app</li>
-</ul>
-<p style="color:#8aa0b8;">Select an add-on to see its details.</p>
-"""
-
-
 def _addon_html(addon: Addon | None) -> str:
     if addon is None:
         return _WELCOME
-    state = ('<span style="color:#3ddc84;">Enabled</span>' if addon.enabled
-             else '<span style="color:#ffb454;">Disabled</span>')
-    fields = [
-        ("Creator", addon.creator or "—"),
-        ("Type", addon.type_label),
-        ("Version", addon.version or "—"),
-        ("Min sim", addon.min_game_version or "—"),
-        ("Size", human_size(addon.size_bytes)),
-        ("State", state),
-    ]
-    rows = "".join(
-        f'<tr><td style="color:#7bdcff; padding:2px 14px 2px 0;"><b>{escape(k)}</b></td>'
-        f'<td>{v if k == "State" else escape(str(v))}</td></tr>'
-        for k, v in fields
-    )
-    title = escape(addon.display_title)
-    return f"""
-    <div style="color:#ff8c42; font-size:16px; font-weight:bold;">{title}</div>
-    <div style="color:#7e8aa0;">{escape(addon.name)}</div>
-    <table style="margin-top:10px;">{rows}</table>
-    <div style="color:#54627a; margin-top:12px;">{escape(str(addon.path))}</div>
-    """
+    return _theme_addon_html(addon, human_size)
 
 
 class LiftOffWindow(QMainWindow):
@@ -356,6 +270,7 @@ class LiftOffWindow(QMainWindow):
         self.toggle_btn = QPushButton("Enable / Disable")
         self.toggle_btn.clicked.connect(self._toggle)
         remove_btn = QPushButton("Remove")
+        remove_btn.setObjectName("danger")
         remove_btn.clicked.connect(self._remove)
         rescan_btn = QPushButton("Rescan")
         rescan_btn.clicked.connect(self._rescan)
