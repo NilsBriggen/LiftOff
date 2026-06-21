@@ -5,20 +5,34 @@ package at the archive root, inside a versioned folder, inside a ``Community``
 folder, or several packages side by side. We locate every ``manifest.json`` and
 treat its parent directory as a package root, ignoring nested ones.
 
+Speed:
+
+* Extraction prefers native C extractors — ``bsdtar``/``unzip`` or the
+  ``libarchive`` shared library — and only falls back to Python's ``zipfile``.
+* Archives are staged on the *same filesystem* as the Community folder, so
+  installing is an atomic ``rename`` instead of copying gigabytes twice.
+
 Enable/disable and remove are non-destructive: disabled packages move to a
 managed store and removed packages move to a trash store, both reversible.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import tempfile
+import threading
 import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
+
+# libarchive's extract_file works against the current directory, so serialise
+# the brief chdir it needs. Everything else in LiftOff uses absolute paths.
+_CHDIR_LOCK = threading.Lock()
 
 
 class InstallError(Exception):
@@ -36,40 +50,98 @@ class InstallResult:
 
 
 # --------------------------------------------------------------------- extract
+def _run(cmd: list[str]) -> bool:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except (OSError, ValueError):
+        return False
+    return proc.returncode == 0
+
+
+def _have(tool: str) -> bool:
+    return shutil.which(tool) is not None
+
+
+def _libarchive_extract(archive: Path, dest: Path) -> bool:
+    try:
+        import libarchive  # ctypes wrapper over the C libarchive
+    except Exception:
+        return False
+    try:
+        with _CHDIR_LOCK:
+            cwd = os.getcwd()
+            os.chdir(dest)
+            try:
+                libarchive.extract_file(str(archive))
+            finally:
+                os.chdir(cwd)
+        return True
+    except Exception:
+        return False
+
+
+def _zipfile_extract(archive: Path, dest: Path) -> bool:
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(dest)
+        return True
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def _bsdtar(archive: Path, dest: Path) -> bool:
+    return _have("bsdtar") and _run(["bsdtar", "-xf", str(archive), "-C", str(dest)])
+
+
+def _strategies(suffix: str):
+    """Ordered extractors for a suffix: native C first, Python last."""
+    bsdtar = _bsdtar
+    if suffix == ".zip":
+        return [
+            bsdtar,
+            lambda a, d: _have("unzip") and _run(["unzip", "-o", "-q", str(a), "-d", str(d)]),
+            _libarchive_extract,
+            _zipfile_extract,
+        ]
+    if suffix == ".7z":
+        return [
+            bsdtar,
+            _libarchive_extract,
+            lambda a, d: _have("7z") and _run(["7z", "x", "-y", f"-o{d}", str(a)]),
+            lambda a, d: _have("7za") and _run(["7za", "x", "-y", f"-o{d}", str(a)]),
+        ]
+    if suffix == ".rar":
+        return [
+            bsdtar,
+            _libarchive_extract,
+            lambda a, d: _have("unar") and _run(["unar", "-f", "-o", str(d), str(a)]),
+            lambda a, d: _have("unrar") and _run(["unrar", "x", "-o+", str(a), f"{d}/"]),
+        ]
+    return [bsdtar, _libarchive_extract]
+
+
+def _clear(path: Path) -> None:
+    for child in path.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
 def _extract(archive: Path, dest: Path) -> None:
     suffix = archive.suffix.lower()
+    strategies = _strategies(suffix)
+    for extract in strategies:
+        _clear(dest)
+        if extract(archive, dest):
+            return
+    _clear(dest)
     if suffix == ".zip":
-        try:
-            with zipfile.ZipFile(archive) as zf:
-                zf.extractall(dest)
-        except zipfile.BadZipFile as exc:
-            raise InstallError(f"Not a valid zip archive: {archive.name}") from exc
-        return
-    # rar / 7z need an external tool; use whatever the user has installed.
-    tool = _external_extractor()
-    if tool is None:
-        raise InstallError(
-            f"{suffix} archives need 7z, unar or unrar installed. "
-            f"Install one (e.g. 'sudo apt install p7zip-full') or extract {archive.name} manually."
-        )
-    import subprocess
-
-    cmd = tool + [str(archive)]
-    proc = subprocess.run(cmd, cwd=dest, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise InstallError(f"Failed to extract {archive.name}: {proc.stderr.strip()[:200]}")
-
-
-def _external_extractor() -> list[str] | None:
-    if shutil.which("7z"):
-        return ["7z", "x", "-y"]
-    if shutil.which("7za"):
-        return ["7za", "x", "-y"]
-    if shutil.which("unar"):
-        return ["unar", "-f", "-o", "."]
-    if shutil.which("unrar"):
-        return ["unrar", "x", "-o+"]
-    return None
+        raise InstallError(f"Could not extract {archive.name} (corrupt archive?).")
+    raise InstallError(
+        f"Could not extract {archive.name}. Install libarchive, 7z or unar "
+        f"for {suffix} support (e.g. 'sudo apt install libarchive-tools p7zip-full')."
+    )
 
 
 # ---------------------------------------------------------------- find packages
@@ -78,7 +150,6 @@ def find_packages(root: Path) -> list[Path]:
     markers: list[Path] = []
     for marker_name in ("manifest.json", "layout.json"):
         markers += [p.parent for p in root.rglob(marker_name)]
-    # Deduplicate and drop any directory nested inside another candidate.
     unique = sorted(set(markers), key=lambda p: len(p.parts))
     roots: list[Path] = []
     for cand in unique:
@@ -95,8 +166,15 @@ def _is_within(child: Path, parent: Path) -> bool:
         return False
 
 
+# -------------------------------------------------------------- moving in place
+def _move(src: Path, dst: Path) -> None:
+    try:
+        os.replace(src, dst)  # atomic when src and dst share a filesystem
+    except OSError:
+        shutil.move(str(src), str(dst))  # cross-device: copy + delete
+
+
 def _place(src: Path, community: Path, trash: Path | None) -> str:
-    """Move package dir *src* into *community*, backing up any existing copy."""
     community.mkdir(parents=True, exist_ok=True)
     target = community / src.name
     if target.exists():
@@ -104,8 +182,15 @@ def _place(src: Path, community: Path, trash: Path | None) -> str:
             _to_trash(target, trash)
         else:
             shutil.rmtree(target, ignore_errors=True)
-    shutil.move(str(src), str(target))
+    _move(src, target)
     return src.name
+
+
+def _staging(community: Path) -> Path:
+    """A temp dir on the same filesystem as Community, so moves are renames."""
+    parent = community.parent
+    base = str(parent) if parent.is_dir() and os.access(parent, os.W_OK) else None
+    return Path(tempfile.mkdtemp(prefix=".liftoff-", dir=base))
 
 
 # ------------------------------------------------------------------ public ops
@@ -118,12 +203,12 @@ def install_archive(
     if archive.suffix.lower() not in ARCHIVE_SUFFIXES:
         raise InstallError(f"Unsupported file type: {archive.suffix or archive.name}")
 
-    result = InstallResult()
-    with tempfile.TemporaryDirectory(prefix="liftoff-") as tmp:
-        tmpdir = Path(tmp)
-        _extract(archive, tmpdir)
-        result = _install_from_tree(tmpdir, community, trash, fallback_name=archive.stem)
-    return result
+    staging = _staging(community)
+    try:
+        _extract(archive, staging)
+        return _install_from_tree(staging, community, trash, fallback_name=archive.stem)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def install_folder(folder: Path, community: Path, trash: Path | None = None) -> InstallResult:
@@ -147,7 +232,7 @@ def _install_from_tree(
         if pkg == tree:
             # Manifest sits at the archive root: wrap it in a sensibly named dir.
             staged = tree.parent / _safe_name(fallback_name)
-            shutil.move(str(tree), str(staged))
+            _move(tree, staged)
             result.installed.append(_place(staged, community, trash))
         else:
             result.installed.append(_place(pkg, community, trash))
@@ -166,7 +251,7 @@ def set_enabled(addon_path: Path, enabled: bool, community: Path, disabled_store
         return addon_path
     if target.exists():
         raise InstallError(f"'{addon_path.name}' already exists in the destination.")
-    shutil.move(str(addon_path), str(target))
+    _move(addon_path, target)
     return target
 
 
@@ -186,7 +271,7 @@ def _to_trash(path: Path, trash: Path) -> None:
     while dest.exists():
         dest = trash / f"{stamp}-{i}-{path.name}"
         i += 1
-    shutil.move(str(path), str(dest))
+    _move(path, dest)
 
 
 def _safe_name(name: str) -> str:

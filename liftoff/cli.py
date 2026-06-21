@@ -1,12 +1,14 @@
 """Command-line entry point.
 
-Running ``liftoff`` with no arguments launches the TUI. A few headless
-subcommands make the same engine scriptable and easy to test.
+Running ``liftoff`` with no arguments launches the graphical UI (``--tui`` for
+the terminal UI instead). A few headless subcommands make the same engine
+scriptable and easy to test.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -84,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="LiftOff — a fast Linux mod manager for Microsoft Flight Simulator.",
     )
     parser.add_argument("--version", action="version", version=f"LiftOff {__version__}")
+    ui = parser.add_mutually_exclusive_group()
+    ui.add_argument("--gui", action="store_true", help="force the graphical UI (default)")
+    ui.add_argument("--tui", action="store_true", help="force the terminal UI")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("detect", help="detect MSFS installs and Community folders")
@@ -106,10 +111,32 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_list(args)
     if args.command == "install":
         return cmd_install(args)
-    # Default: launch the TUI. Imported lazily so headless commands stay quick.
-    from .app import run
+    return _launch_ui(args)
 
-    return run()
+
+def _has_display() -> bool:
+    return bool(
+        os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
+        or os.environ.get("QT_QPA_PLATFORM")
+    )
+
+
+def _launch_ui(args: argparse.Namespace) -> int:
+    """Launch the GUI on a desktop, the TUI on a headless box or on request."""
+    def tui() -> int:
+        from .app import run
+
+        return run()
+
+    if args.tui or (not args.gui and not _has_display()):
+        return tui()
+    try:
+        from .gui import run_gui
+    except Exception as exc:  # PySide6 missing or no Qt platform libs
+        print(f"GUI unavailable ({exc}); falling back to the terminal UI.", file=sys.stderr)
+        return tui()
+    return run_gui()
 
 
 if __name__ == "__main__":

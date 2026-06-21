@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,8 +68,24 @@ def dir_size(path: Path) -> int:
     return total
 
 
+def _manifest_size(manifest: dict) -> int | None:
+    """MSFS manifests carry total_package_size — use it to avoid a disk walk."""
+    value = manifest.get("total_package_size")
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _addon_from_dir(path: Path, enabled: bool, with_size: bool) -> Addon:
     manifest = parse_manifest(path)
+    size: int | None = None
+    if with_size:
+        size = _manifest_size(manifest)
+        if size is None:
+            size = dir_size(path)  # fallback: walk the package
     return Addon(
         name=path.name,
         path=path,
@@ -78,7 +95,7 @@ def _addon_from_dir(path: Path, enabled: bool, with_size: bool) -> Addon:
         content_type=str(manifest.get("content_type", "")).strip(),
         version=str(manifest.get("package_version", "")).strip(),
         min_game_version=str(manifest.get("minimum_game_version", "")).strip(),
-        size_bytes=dir_size(path) if with_size else None,
+        size_bytes=size,
     )
 
 
@@ -86,16 +103,22 @@ def scan(
     community: Path, disabled_store: Path | None = None, with_size: bool = False
 ) -> list[Addon]:
     """List enabled add-ons in *community* plus disabled ones in *disabled_store*."""
-    addons: list[Addon] = []
+    entries: list[tuple[Path, bool]] = []
     if community.is_dir():
         for child in sorted(community.iterdir(), key=lambda p: p.name.lower()):
             if child.is_dir() and not child.name.startswith("."):
-                addons.append(_addon_from_dir(child, enabled=True, with_size=with_size))
+                entries.append((child, True))
     if disabled_store and disabled_store.is_dir():
         for child in sorted(disabled_store.iterdir(), key=lambda p: p.name.lower()):
             if child.is_dir():
-                addons.append(_addon_from_dir(child, enabled=False, with_size=with_size))
-    return addons
+                entries.append((child, False))
+    if not entries:
+        return []
+    if with_size and len(entries) > 1:
+        # Sizing may need to walk dirs (I/O bound) — fan out across threads.
+        with ThreadPoolExecutor(max_workers=min(8, len(entries))) as pool:
+            return list(pool.map(lambda e: _addon_from_dir(e[0], e[1], True), entries))
+    return [_addon_from_dir(path, enabled, with_size) for path, enabled in entries]
 
 
 def human_size(num: int | None) -> str:

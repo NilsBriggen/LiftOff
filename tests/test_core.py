@@ -67,6 +67,21 @@ def test_human_size():
     assert library.human_size(2048) == "2.0 KB"
 
 
+def test_scan_uses_manifest_total_package_size(tmp_path):
+    # When the manifest reports a size, scan must trust it (no disk walk).
+    community = tmp_path / "Community"
+    pkg = community / "big-aircraft"
+    pkg.mkdir(parents=True)
+    (pkg / "manifest.json").write_text(
+        json.dumps({"title": "Jet", "content_type": "AIRCRAFT",
+                    "total_package_size": "1073741824"})  # 1 GiB
+    )
+    (pkg / "small.bin").write_bytes(b"x" * 16)  # real on-disk size is tiny
+    addons = library.scan(community, with_size=True)
+    assert addons[0].size_bytes == 1073741824
+    assert library.human_size(addons[0].size_bytes) == "1.0 GB"
+
+
 # ---------------------------------------------------------------------- install
 def test_find_packages_nested_and_multi(tmp_path):
     root = tmp_path / "extract"
