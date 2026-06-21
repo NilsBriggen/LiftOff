@@ -18,10 +18,14 @@ classifiers = [
     "Topic :: Games/Entertainment :: Simulation",
 ]
 dynamic = ["version"]
-dependencies = ["textual>=1.0"]
+dependencies = [
+    "PySide6-Essentials>=6.6",  # the desktop GUI
+    "textual>=1.0",             # the terminal UI (liftoff --tui)
+    "libarchive-c>=5.0",        # fast native multi-format extraction
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.4"]
+dev = ["pytest>=7", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
 [project.scripts]
 liftoff = "liftoff.cli:main"
